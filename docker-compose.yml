@@ -1,0 +1,23 @@
+# Production: build the static bundle and serve it with the API.
+# Reads .env.production for build args and the host port:
+#   docker compose --env-file .env.production up -d --build
+services:
+  app:
+    build:
+      context: .
+      args:
+        VITE_SITE_URL: ${VITE_SITE_URL:-http://localhost:3000}
+        VITE_PLAUSIBLE_DOMAIN: ${VITE_PLAUSIBLE_DOMAIN:-}
+        VITE_PLAUSIBLE_SRC: ${VITE_PLAUSIBLE_SRC:-}
+    image: ghcr.io/daspete/promptdesk:latest
+    env_file:
+      - path: .env.production
+        required: false
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - prompts:/app/data/prompts   # saved prompt files survive rebuilds
+
+volumes:
+  prompts:

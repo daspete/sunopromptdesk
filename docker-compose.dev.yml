@@ -1,0 +1,21 @@
+# Development: Vite dev server with HMR + API, source bind-mounted.
+#   docker compose -f docker-compose.dev.yml up --build
+# Frontend: http://localhost:5173  (proxies /api to the server)
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CHOKIDAR_USEPOLLING: "true"   # reliable file watching on bind mounts (WSL/Windows/macOS)
+    ports:
+      - "5173:5173"
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules            # keep the image's node_modules, not the host's
+      - ./data/prompts:/app/data/prompts
+    command: npm run dev
