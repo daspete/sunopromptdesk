@@ -11,18 +11,24 @@ function setConsent(v: 'granted' | 'denied') {
   try { localStorage.setItem(KEY, v) } catch { /* ignore */ }
 }
 
+type PlausibleFn = ((...a: unknown[]) => void) & { q?: unknown[]; o?: Record<string, unknown>; init?: (o?: Record<string, unknown>) => void }
+
 let loaded = false
 export function loadPlausible() {
   if (loaded || !PLAUSIBLE_DOMAIN) return
   loaded = true
+  const w = window as unknown as { plausible?: PlausibleFn }
+  // Queue stub so `plausible('event')` works before the script arrives. The newer `pa-*.js` scripts
+  // also expect `plausible.init()` to have been called; the classic script.js simply ignores it.
+  const stub: PlausibleFn = w.plausible || function (...args: unknown[]) { (stub.q = stub.q || []).push(args) }
+  stub.init = stub.init || ((o) => { stub.o = o || {} })
+  w.plausible = stub
+  stub.init({ domain: PLAUSIBLE_DOMAIN })
   const s = document.createElement('script')
-  s.defer = true
+  s.async = true
   s.dataset.domain = PLAUSIBLE_DOMAIN
   s.src = PLAUSIBLE_SRC
   document.head.appendChild(s)
-  // queue function so `plausible('event')` works before the script arrives
-  const w = window as unknown as { plausible?: (...a: unknown[]) => void }
-  w.plausible = w.plausible || function (...args: unknown[]) { ((w.plausible as unknown as { q: unknown[] }).q = (w.plausible as unknown as { q: unknown[] }).q || []).push(args) }
 }
 
 export function trackEvent(name: string, props?: Record<string, string | number>) {

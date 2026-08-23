@@ -7,8 +7,11 @@ Structured Suno prompt + track-progression-sheet builder. Vite (vanilla TS) stat
 npm install
 npm run dev       # Vite dev server (http://localhost:5173) + API on :3000
 npm run build     # static build to dist/
-npm start         # serve dist/ + API on http://localhost:3000
+npm start         # serve dist/ + API on http://localhost:3000 (server runs as TypeScript via Node's native type stripping, Node ≥ 23.6)
 ```
+
+## Generation
+Prompts and progression sheets are generated **server-side** (`POST /api/generate`, `server/builder.ts`). All phrase templates, section descriptions and layouts live only on the server; the client bundle contains just option ids/labels (`shared/data.ts`). The client debounces requests, cancels superseded ones and shows a loader on the sheet panel.
 
 ## Storage
 - **Server:** write-only. `POST /api/prompts` stores `data/prompts/<userId>/<id>.json` (+ a readable `.txt`). There is no endpoint to read or delete prompts.

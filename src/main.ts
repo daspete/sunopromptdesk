@@ -1,8 +1,9 @@
 import './style.css'
 import {
   ARRANGEMENT_GROUPS, ERAS, GENRE_GROUPS, INSTRUMENT_GROUPS, KEYS, MOOD_GROUPS, PRODUCTION_GROUPS, PROGRESSION_GROUPS, SCALES, VOCAL_GROUPS, type Option, type OptionGroup,
-} from './data'
-import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, autoLayers, buildLayers, buildProgression, buildPrompt, newSeed, type Settings } from './builder'
+} from '../shared/data'
+import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, newSeed, type Generated, type Settings } from '../shared/settings'
+import { requestGeneration } from './api'
 import {
   getUserId, loadDraft, loadHistory, saveDraft, saveHistory, savePromptToServer, type SavedPrompt,
 } from './storage'
@@ -13,6 +14,8 @@ const migrate = (p: Partial<Settings> & { bpm?: number }): Partial<Settings> =>
   p.bpm != null && p.bpmMin == null ? { ...p, bpmMin: p.bpm, bpmMax: p.bpm } : p
 let settings: Settings = { ...DEFAULT_SETTINGS, seed: newSeed(), progSeed: newSeed(), ...migrate(loadDraft() ?? {}) }
 let history: SavedPrompt[] = loadHistory()
+let gen: Generated = { prompt: '', progression: [], layers: [], suggestedLayers: [] }
+let loading = true
 const openGroups = new Set<string>()
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -91,8 +94,8 @@ const genreRack = () => `
 
 const layerEditor = () => {
   const custom = settings.layers.length > 0
-  const layers = custom ? settings.layers : autoLayers(settings).map((name) => ({ name, entry: '' }))
-  const suggestions = autoLayers({ ...settings, layers: [] }).filter((n) => !layers.some((l) => l.name === n))
+  const layers = custom ? settings.layers : gen.suggestedLayers.map((name) => ({ name, entry: '' }))
+  const suggestions = gen.suggestedLayers.filter((n) => !layers.some((l) => l.name === n))
   return `
   <div class="layer-editor">
     <div class="layer-head"><h3>Layer order</h3><span>${custom ? 'custom' : 'suggested from your selection'}</span>
@@ -158,8 +161,8 @@ const timeline = (prog: string[], total: number) => {
 }
 
 function render() {
-  const prompt = buildPrompt(settings)
-  const prog = buildProgression(settings)
+  const prompt = gen.prompt
+  const prog = gen.progression
   const pct = Math.min(100, (prompt.length / MAX_PROMPT) * 100)
 
   app.innerHTML = `
@@ -210,13 +213,14 @@ function render() {
     </section>
 
     <aside class="sheet">
-      <div class="sticky">
+      <div class="sticky ${loading ? 'is-loading' : ''}" aria-busy="${loading}">
+        <div class="loader" role="status" aria-label="Generating"><span></span><span></span><span></span><span></span><span></span></div>
         <div class="sheet-head">
           <h2>Prompt</h2>
           <span class="count ${prompt.length > MAX_PROMPT ? 'warn' : ''}">${prompt.length}<i>/${MAX_PROMPT}</i></span>
         </div>
         <div class="meter"><i style="width:${pct}%"></i></div>
-        <pre class="prompt" id="promptOut">${esc(prompt) || '<span class="muted">Pick a genre or two to start.</span>'}</pre>
+        <pre class="prompt" id="promptOut">${esc(prompt) || (loading ? '' : '<span class="muted">Pick a genre or two to start.</span>')}</pre>
         <div class="actions">
           <button class="btn" data-copy="prompt">Copy prompt</button>
           <button class="btn" id="shuffleBtn" title="Re-roll the prompt wording">Shuffle prompt</button>
@@ -233,7 +237,7 @@ function render() {
 
         <div class="save">
           <input id="title" placeholder="Name this prompt" />
-          <button class="btn primary" id="saveBtn" ${prompt ? '' : 'disabled'}>Save</button>
+          <button class="btn primary" id="saveBtn" ${prompt && !loading ? '' : 'disabled'}>Save</button>
           <button class="btn quiet" id="resetBtn" title="Reset every section to its defaults">Reset all</button>
         </div>
         <p class="status" id="status"></p>
@@ -264,8 +268,7 @@ function render() {
 }
 
 function curveSvg(s: Settings) {
-  const prog = buildProgression(s)
-  const n = prog.length
+  const n = Math.max(1, gen.progression.length)
   const pts = Array.from({ length: 41 }, (_, i) => {
     const t = i / 40
     const e = ({
@@ -289,11 +292,21 @@ function setStatus(msg: string, ok = true) {
 function update(patch: Partial<Settings>) {
   settings = { ...settings, ...patch }
   saveDraft(settings)
+  regenerate()
+}
+
+async function regenerate() {
+  loading = true
+  render()
+  const result = await requestGeneration(settings)
+  if (!result) return // superseded by a newer request
+  gen = result
+  loading = false
   render()
 }
 
 function currentLayers() {
-  return settings.layers.length ? settings.layers : autoLayers(settings).map((name) => ({ name, entry: '' }))
+  return settings.layers.length ? settings.layers : gen.suggestedLayers.map((name) => ({ name, entry: '' }))
 }
 
 function bind() {
@@ -422,7 +435,7 @@ function bind() {
       id: `local-${Date.now()}`, userId,
       title: (document.getElementById('title') as HTMLInputElement).value.trim(),
       createdAt: new Date().toISOString(),
-      prompt: buildPrompt(settings), progression: buildProgression(settings), settings,
+      prompt: gen.prompt, progression: gen.progression, settings,
     }
     const synced = await savePromptToServer(item)
     history = [synced ?? item, ...history]
@@ -450,5 +463,5 @@ function bind() {
     }))
 }
 
-render()
+regenerate()
 initConsent()

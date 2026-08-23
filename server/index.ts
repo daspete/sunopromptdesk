@@ -3,6 +3,7 @@ import compression from 'compression'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { generate } from './builder.ts'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..')
@@ -23,7 +24,17 @@ app.use(express.json({ limit: '64kb' }))
 
 await fs.mkdir(DATA_DIR, { recursive: true })
 
-const safeId = (s) => /^[a-zA-Z0-9_-]{1,80}$/.test(s)
+const safeId = (s: unknown) => typeof s === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(s)
+
+// Generate prompt + progression sheet server-side (templates never leave the server)
+app.post('/api/generate', (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store')
+    res.json(generate(req.body?.settings))
+  } catch {
+    res.status(400).json({ error: 'invalid settings' })
+  }
+})
 
 // Save a generated prompt as a file
 app.post('/api/prompts', async (req, res) => {

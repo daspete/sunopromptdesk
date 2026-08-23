@@ -197,3 +197,14 @@ pre.prog { color: var(--scope); }
 .reset-sec + .reset-sec { margin-left: 6px; }
 .reset-sec:hover { color: var(--accent); }
 .reset-sec:disabled { opacity: .3; cursor: default; color: var(--muted); }
+
+/* generation loader */
+.sheet .sticky { position: relative; }
+.loader { position: absolute; top: 14px; right: 22px; display: none; gap: 3px; align-items: flex-end; height: 14px; }
+.loader span { width: 3px; height: 4px; background: var(--accent); animation: vu .9s ease-in-out infinite; }
+.loader span:nth-child(2) { animation-delay: .12s } .loader span:nth-child(3) { animation-delay: .24s } .loader span:nth-child(4) { animation-delay: .36s } .loader span:nth-child(5) { animation-delay: .48s }
+@keyframes vu { 0%, 100% { height: 4px } 50% { height: 14px } }
+.is-loading .loader { display: flex; }
+.is-loading pre.prompt, .is-loading pre.prog, .is-loading .tape { opacity: .45; transition: opacity .15s; }
+pre.prompt:empty::before { content: ''; display: block; height: 3.2em; }
+@media (prefers-reduced-motion: reduce) { .loader span { animation: none; height: 10px; } }

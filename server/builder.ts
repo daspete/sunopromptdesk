@@ -1,46 +1,9 @@
 import {
   ARRANGEMENTS, ERAS, GENRES, INSTRUMENTS, genreGroupOf, MOODS, PRODUCTION, PROGRESSION_STYLES, SECTION_TYPES, VOCALS, type Option,
-} from './data'
+} from '../shared/data.ts'
+import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, type Layer, type Settings } from '../shared/settings.ts'
 
-export interface Settings {
-  genres: string[]
-  instruments: string[]
-  moods: string[]
-  progression: string
-  vocals: string
-  arrangement: string
-  era: string
-  production: string[]
-  bpmMin: number
-  bpmMax: number
-  key: string
-  scale: string
-  custom: string
-  seed: number
-  progSeed: number
-  // progression sheet
-  lengthSec: number
-  sectionCount: number
-  energyCurve: 'rise' | 'peak-mid' | 'waves' | 'flat' | 'fall' | 'layers'
-  structure: 'auto' | 'edm' | 'song' | 'ambient'
-  hasIntro: boolean
-  hasOutro: boolean
-  introSeconds: number
-  outroSeconds: number
-  layers: Layer[]
-}
 
-export interface Layer { name: string; entry: string }
-export const LAYER_ENTRIES = ['fade in', 'hard cut in', 'filter opens', 'swells in', 'riser into it', 'drops in on the one', 'sidechained in', 'stutter in']
-
-export const DEFAULT_SETTINGS: Settings = {
-  genres: [], instruments: [], moods: [], progression: 'build', vocals: 'none', arrangement: 'full', era: 'none',
-  production: [], bpmMin: 110, bpmMax: 130, key: 'Any', scale: 'minor', custom: '', seed: 1, progSeed: 1,
-  lengthSec: 180, sectionCount: 6, energyCurve: 'rise', structure: 'auto',
-  hasIntro: true, hasOutro: true, introSeconds: 15, outroSeconds: 15, layers: [],
-}
-
-export const MAX_PROMPT = 1000
 
 // Small deterministic PRNG (mulberry32) so the same seed reproduces the same result
 function rng(seed: number) {
@@ -54,7 +17,6 @@ function rng(seed: number) {
   }
 }
 const pick = <T,>(r: () => number, arr: T[]): T => arr[Math.floor(r() * arr.length)]
-export const newSeed = () => Math.floor(Math.random() * 2 ** 31)
 
 const tags = (list: Option[], ids: string[]) =>
   ids.map((id) => list.find((x) => x.id === id)?.tag).filter(Boolean) as string[]
@@ -738,8 +700,6 @@ const DEFAULT_LAYERS: Record<string, string[]> = {
   gamelan: ['gongs', 'low metallophones', 'mid metallophones', 'high metallophones', 'drums', 'flute'],
 }
 
-export const MAX_LENGTH = 360
-
 export function buildLayers(s: Settings): string[] {
   if (s.layers.length) return s.layers.map((l) => l.name)
   return autoLayers(s)
@@ -817,4 +777,32 @@ export function buildProgression(s: Settings): string[] {
     t = end
   })
   return lines
+}
+
+export function sanitize(input: unknown): Settings {
+  const i = (input ?? {}) as Record<string, unknown>
+  const str = (k: string, d: string) => (typeof i[k] === 'string' ? (i[k] as string).slice(0, 80) : d)
+  const num = (k: string, d: number, lo: number, hi: number) => (typeof i[k] === 'number' && Number.isFinite(i[k]) ? Math.min(hi, Math.max(lo, i[k] as number)) : d)
+  const arr = (k: string) => (Array.isArray(i[k]) ? (i[k] as unknown[]).filter((x) => typeof x === 'string').slice(0, 40) as string[] : [])
+  const d = DEFAULT_SETTINGS
+  return {
+    genres: arr('genres'), instruments: arr('instruments'), moods: arr('moods'), production: arr('production'),
+    progression: str('progression', d.progression), vocals: str('vocals', d.vocals), arrangement: str('arrangement', d.arrangement),
+    era: str('era', d.era), key: str('key', d.key), scale: str('scale', d.scale),
+    custom: typeof i.custom === 'string' ? (i.custom as string).slice(0, 2000) : '',
+    bpmMin: num('bpmMin', d.bpmMin, 40, 220), bpmMax: num('bpmMax', d.bpmMax, 40, 220),
+    seed: num('seed', d.seed, 0, 2 ** 31), progSeed: num('progSeed', d.progSeed, 0, 2 ** 31),
+    lengthSec: num('lengthSec', d.lengthSec, 30, MAX_LENGTH), sectionCount: num('sectionCount', d.sectionCount, 3, 16),
+    energyCurve: (['rise', 'peak-mid', 'waves', 'flat', 'fall', 'layers'].includes(i.energyCurve as string) ? i.energyCurve : d.energyCurve) as Settings['energyCurve'],
+    structure: str('structure', d.structure),
+    hasIntro: typeof i.hasIntro === 'boolean' ? i.hasIntro : d.hasIntro, hasOutro: typeof i.hasOutro === 'boolean' ? i.hasOutro : d.hasOutro,
+    introSeconds: num('introSeconds', d.introSeconds, 0, 60), outroSeconds: num('outroSeconds', d.outroSeconds, 0, 60),
+    layers: Array.isArray(i.layers) ? (i.layers as unknown[]).filter((l): l is Layer => !!l && typeof (l as Layer).name === 'string').slice(0, 16)
+      .map((l) => ({ name: l.name.slice(0, 60), entry: LAYER_ENTRIES.includes(l.entry) ? l.entry : '' })) : [],
+  }
+}
+
+export function generate(input: unknown) {
+  const s = sanitize(input)
+  return { prompt: buildPrompt(s), progression: buildProgression(s), layers: buildLayers(s), suggestedLayers: autoLayers({ ...s, layers: [] }) }
 }

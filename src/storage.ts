@@ -1,4 +1,4 @@
-import type { Settings } from './builder'
+import type { Settings } from '../shared/settings'
 
 export interface SavedPrompt {
   id: string

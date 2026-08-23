@@ -13,7 +13,7 @@
 # Override with ENV_FILE=path/to/file.
 set -euo pipefail
 
-IMAGE="ghcr.io/daspete/promptdesk"
+IMAGE="ghcr.io/daspete/sunopromptdesk"
 cd "$(dirname "$0")/.."
 
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -41,7 +41,7 @@ BUILD_ARGS=(
   --build-arg "VITE_SITE_URL=${VITE_SITE_URL:-}"
   --build-arg "VITE_PLAUSIBLE_DOMAIN=${VITE_PLAUSIBLE_DOMAIN:-}"
   --build-arg "VITE_PLAUSIBLE_SRC=${VITE_PLAUSIBLE_SRC:-}"
-  --label "org.opencontainers.image.source=https://github.com/daspete/promptdesk"
+  --label "org.opencontainers.image.source=https://github.com/daspete/sunopromptdesk"
   --label "org.opencontainers.image.version=${VERSION_TAG}"
   --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   -t "${IMAGE}:latest"
