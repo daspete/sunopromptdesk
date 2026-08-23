@@ -16,6 +16,7 @@ let settings: Settings = { ...DEFAULT_SETTINGS, seed: newSeed(), progSeed: newSe
 let history: SavedPrompt[] = loadHistory()
 let gen: Generated = { prompt: '', progression: [], layers: [], suggestedLayers: [] }
 let loading = true
+let sheetOpen = false
 const openGroups = new Set<string>()
 
 const app = document.querySelector<HTMLDivElement>('#app')!
@@ -154,7 +155,8 @@ const timeline = (prog: string[], total: number) => {
   return `<div class="tape">
     <div class="tape-ruler">${(() => { let last = -100; return [...segs.map((x) => x.a), total].map((a, i, arr) => {
       const pct = (a / total) * 100; const isLast = i === arr.length - 1
-      if (!isLast && (pct - last < 7 || 100 - pct < 7)) return ''
+      const gap = window.innerWidth < 1040 ? 14 : 7
+      if (!isLast && (pct - last < gap || 100 - pct < gap)) return ''
       last = pct; return `<span style="left:${pct}%">${fmt(a)}</span>` }).join('') })()}</div>
     <div class="tape-track">${segs.map((x) => `<div class="seg seg-${x.name.replace(/[^a-z]/gi, '').toLowerCase()}" style="width:${((x.b - x.a) / total) * 100}%" title="${esc(x.name)}"><b>${esc(x.name)}</b></div>`).join('')}</div>
   </div>`
@@ -170,7 +172,7 @@ function render() {
     <div class="brand"><span class="mark"></span><h1>Suno Prompt Desk</h1></div>
     <div class="top-right">
       <p>Pick a sound, shape the arrangement, copy the prompt.</p>
-      <button type="button" class="btn quiet" id="resetAllBtn" title="Reset every section to its defaults">Reset everything</button>
+      <button type="button" class="btn reset-all" id="resetAllBtn" title="Reset every section to its defaults"><span class="reset-icon" aria-hidden="true">↺</span> Reset all</button>
     </div>
   </header>
   <section class="intro">
@@ -212,9 +214,10 @@ function render() {
         ${settings.energyCurve === 'layers' ? layerEditor() : ''}`)}
     </section>
 
-    <aside class="sheet">
+    <aside class="sheet ${sheetOpen ? 'open' : ''}" id="sheetPanel">
       <div class="sticky ${loading ? 'is-loading' : ''}" aria-busy="${loading}">
         <div class="loader" role="status" aria-label="Generating"><span></span><span></span><span></span><span></span><span></span></div>
+        <button type="button" class="sheet-close" id="sheetClose" aria-label="Close">×</button>
         <div class="sheet-head">
           <h2>Prompt</h2>
           <span class="count ${prompt.length > MAX_PROMPT ? 'warn' : ''}">${prompt.length}<i>/${MAX_PROMPT}</i></span>
@@ -244,6 +247,18 @@ function render() {
       </div>
     </aside>
   </main>
+
+  <div class="mobilebar" role="region" aria-label="Prompt status">
+    <button type="button" class="mb-main ${sheetOpen ? 'open' : ''}" id="sheetToggle" aria-expanded="${sheetOpen}" aria-controls="sheetPanel">
+      <span class="mb-chev" aria-hidden="true"></span>
+      <span class="mb-text">
+        <span class="mb-label">${sheetOpen ? 'Hide prompt & progression sheet' : 'Show prompt & progression sheet'}</span>
+        <span class="mb-sub">${loading ? 'generating…' : `${prompt.length} / ${MAX_PROMPT} characters · ${prog.length} sections`}</span>
+      </span>
+      ${loading ? '<span class="mb-dot"></span>' : ''}
+    </button>
+    <button type="button" class="btn primary mb-copy" data-copy="both" ${prompt ? '' : 'disabled'} title="Copy prompt and sheet">Copy</button>
+  </div>
 
   <section class="history">
     <h2>Saved prompts <small>${history.length}</small></h2>
@@ -310,6 +325,9 @@ function currentLayers() {
 }
 
 function bind() {
+  const setSheet = (open: boolean) => { sheetOpen = open; document.body.classList.toggle('sheet-open', open); render() }
+  document.getElementById('sheetToggle')?.addEventListener('click', () => setSheet(!sheetOpen))
+  document.getElementById('sheetClose')?.addEventListener('click', () => setSheet(false))
   app.querySelectorAll<HTMLDetailsElement>('details.module').forEach((d) =>
     d.addEventListener('toggle', () => { d.open ? openSections.add(d.dataset.sec!) : openSections.delete(d.dataset.sec!) }))
   app.querySelectorAll<HTMLButtonElement>('.reset-sec').forEach((b) => b.addEventListener('click', (e) => e.stopPropagation()))
