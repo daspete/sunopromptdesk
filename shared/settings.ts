@@ -1,5 +1,8 @@
 export interface Layer { name: string; entry: string }
 
+/** Per-section control: which selected genres/moods lead this section and how intense it is (0–100, -1 = auto). */
+export interface SectionOverride { genres: string[]; moods: string[]; energy: number }
+
 export interface Settings {
   genres: string[]
   instruments: string[]
@@ -25,6 +28,8 @@ export interface Settings {
   introSeconds: number
   outroSeconds: number
   layers: Layer[]
+  sectionOverrides: SectionOverride[]
+  mode: 'basic' | 'pro'
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   production: [], bpmMin: 110, bpmMax: 130, key: 'Any', scale: 'minor', custom: '', seed: 1, progSeed: 1,
   lengthSec: 180, sectionCount: 6, energyCurve: 'rise', structure: 'auto',
   hasIntro: true, hasOutro: true, introSeconds: 15, outroSeconds: 15, layers: [],
+  sectionOverrides: [], mode: 'basic',
 }
 
 export const MAX_PROMPT = 1000

@@ -2,7 +2,7 @@ import './style.css'
 import {
   ARRANGEMENT_GROUPS, ERAS, GENRE_GROUPS, INSTRUMENT_GROUPS, KEYS, MOOD_GROUPS, PRODUCTION_GROUPS, PROGRESSION_GROUPS, SCALES, VOCAL_GROUPS, type Option, type OptionGroup,
 } from '../shared/data'
-import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, newSeed, type Generated, type Settings } from '../shared/settings'
+import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, newSeed, type Generated, type SectionOverride, type Settings } from '../shared/settings'
 import { requestGeneration } from './api'
 import {
   getUserId, loadDraft, loadHistory, saveDraft, saveHistory, savePromptToServer, type SavedPrompt,
@@ -12,7 +12,9 @@ import { initConsent, trackEvent } from './consent'
 const userId = getUserId()
 const migrate = (p: Partial<Settings> & { bpm?: number }): Partial<Settings> =>
   p.bpm != null && p.bpmMin == null ? { ...p, bpmMin: p.bpm, bpmMax: p.bpm } : p
-let settings: Settings = { ...DEFAULT_SETTINGS, seed: newSeed(), progSeed: newSeed(), ...migrate(loadDraft() ?? {}) }
+const draft = loadDraft()
+// existing drafts predate the mode switch: those users were using the full editor
+let settings: Settings = { ...DEFAULT_SETTINGS, seed: newSeed(), progSeed: newSeed(), ...(draft && draft.mode == null ? { mode: 'pro' as const } : {}), ...migrate(draft ?? {}) }
 let history: SavedPrompt[] = loadHistory()
 let gen: Generated = { prompt: '', progression: [], layers: [], suggestedLayers: [] }
 let loading = true
@@ -41,7 +43,7 @@ const range = (key: keyof Settings, min: number, max: number, step: number, unit
 const RESET_KEYS: Record<string, (keyof Settings)[]> = {
   genres: ['genres'], moods: ['moods'], instruments: ['instruments'], arrangement: ['arrangement'], vocals: ['vocals'],
   progression: ['progression'], era: ['era'], production: ['production'], tempo: ['bpmMin', 'bpmMax', 'key', 'scale'],
-  custom: ['custom'], track: ['lengthSec', 'sectionCount', 'structure', 'energyCurve', 'hasIntro', 'hasOutro', 'introSeconds', 'outroSeconds', 'layers'],
+  custom: ['custom'], track: ['lengthSec', 'sectionCount', 'structure', 'energyCurve', 'hasIntro', 'hasOutro', 'introSeconds', 'outroSeconds', 'layers', 'sectionOverrides'],
 }
 const isDefault = (section: string) =>
   RESET_KEYS[section].every((k) => JSON.stringify(settings[k]) === JSON.stringify(DEFAULT_SETTINGS[k]))
@@ -62,7 +64,7 @@ const SHUFFLERS: Record<string, () => Partial<Settings>> = {
   tempo: () => { const lo = 60 + rnd(120); return { bpmMin: lo, bpmMax: lo + rnd(4) * 5, key: one(KEYS), scale: one(SCALES) } },
   track: () => ({
     lengthSec: 90 + rnd(55) * 5, sectionCount: 4 + rnd(9), structure: 'auto', energyCurve: one(['rise', 'peak-mid', 'waves', 'flat', 'fall', 'layers'] as const),
-    hasIntro: Math.random() < 0.85, hasOutro: Math.random() < 0.85, introSeconds: 5 + rnd(26), outroSeconds: 5 + rnd(26), layers: [], progSeed: newSeed(),
+    hasIntro: Math.random() < 0.85, hasOutro: Math.random() < 0.85, introSeconds: 5 + rnd(26), outroSeconds: 5 + rnd(26), layers: [], sectionOverrides: [], progSeed: newSeed(),
   }),
 }
 
@@ -122,6 +124,131 @@ const layerEditor = () => {
   </div>`
 }
 
+// ---- section mix (per-section genre / mood / intensity) ----
+
+const energyAtClient = (t: number, curve: Settings['energyCurve']) => ({
+  rise: 0.2 + 0.8 * t, fall: 1 - 0.8 * t, 'peak-mid': 0.25 + 0.75 * Math.sin(Math.PI * t),
+  waves: 0.35 + 0.65 * Math.abs(Math.sin(Math.PI * 2.5 * t)), flat: 0.6, layers: 0.15 + 0.85 * t,
+} as Record<string, number>)[curve]
+
+const EMPTY_OV: SectionOverride = { genres: [], moods: [], energy: -1 }
+const ovIsEmpty = (o: SectionOverride) => !o.genres.length && !o.moods.length && o.energy < 0
+
+function setOverride(i: number, patch: Partial<SectionOverride>) {
+  const list = settings.sectionOverrides.map((o) => ({ ...o }))
+  while (list.length <= i) list.push({ ...EMPTY_OV, genres: [], moods: [] })
+  list[i] = { ...list[i], ...patch }
+  while (list.length && ovIsEmpty(list[list.length - 1])) list.pop()
+  update({ sectionOverrides: list })
+}
+
+const sectionMix = () => {
+  const secs = gen.progression
+    .map((line) => line.match(/^\[(\d+:\d+)-(\d+:\d+) ([^:]+):/))
+    .filter(Boolean) as RegExpMatchArray[]
+  if (!secs.length) return ''
+  const allG = GENRE_GROUPS.flatMap((g) => g.genres)
+  const allM = MOOD_GROUPS.flatMap((g) => g.options)
+  const canG = settings.genres.length > 1, canM = settings.moods.length > 0
+  const touched = settings.sectionOverrides.filter((o) => !ovIsEmpty(o)).length
+  return `
+  <details class="secmix" ${openGroups.has('secmix') ? 'open' : ''}>
+    <summary><span>Section mix</span><em>${touched ? `${touched} section${touched > 1 ? 's' : ''} customised` : 'genre · mood · intensity per section'}</em></summary>
+    <p class="muted small">${canG || canM
+      ? 'Decide what leads each section. Anything you leave on auto is filled in for you.'
+      : 'Select two or more genres, or a mood, in the sections above — then you can distribute them across the track here.'}</p>
+    <ol class="sm-list">
+      ${secs.map((m, i) => {
+        const o = settings.sectionOverrides[i] ?? EMPTY_OV
+        const auto = o.energy < 0
+        const val = auto ? Math.round((energyAtClient((i + 0.5) / secs.length, settings.energyCurve) ?? 0.6) * 100) : o.energy
+        return `
+        <li>
+          <div class="sm-head"><b>${esc(m[3])}</b><span>${m[1]}–${m[2]}</span>
+            <button type="button" class="reset-sec" data-sm-reset="${i}" title="Back to automatic" ${ovIsEmpty(o) ? 'disabled' : ''}>auto</button></div>
+          ${canG ? `<div class="sm-row"><span class="sm-lab">genre</span>${settings.genres.map((gid) => {
+            const g = allG.find((x) => x.id === gid)
+            return g ? `<button type="button" class="chip sm-chip${o.genres.includes(gid) ? ' on' : ''}" data-sm="g:${i}:${gid}">${esc(g.label)}</button>` : ''
+          }).join('')}</div>` : ''}
+          ${canM ? `<div class="sm-row"><span class="sm-lab">mood</span>${settings.moods.map((mid) => {
+            const x = allM.find((y) => y.id === mid)
+            return x ? `<button type="button" class="chip sm-chip mood${o.moods.includes(mid) ? ' on' : ''}" data-sm="m:${i}:${mid}">${esc(x.label)}</button>` : ''
+          }).join('')}</div>` : ''}
+          <div class="sm-row"><span class="sm-lab">intensity</span>
+            <input type="range" class="sm-energy" data-i="${i}" min="0" max="100" step="5" value="${val}" />
+            <output class="${auto ? '' : 'set'}">${auto ? 'auto' : `${val}%`}</output></div>
+        </li>`
+      }).join('')}
+    </ol>
+  </details>`
+}
+
+// ---- basic mode ----
+
+const B = (id: string, label: string): Option => ({ id, label, tag: label })
+const BASIC_STYLES: Option[] = [
+  B('pop', 'Pop'), B('rock', 'Rock'), B('metal', 'Metal'), B('punk', 'Punk'), B('hiphop', 'Hip Hop'), B('trap', 'Trap'),
+  B('rnb', 'R&B / Soul'), B('edm', 'Dance / EDM'), B('house', 'House'), B('techno', 'Techno'), B('trance', 'Trance'),
+  B('dnb', 'Drum & Bass'), B('synthwave', 'Synthwave'), B('lofi', 'Lo-fi Beats'), B('country', 'Country'),
+  B('folk', 'Folk / Acoustic'), B('singersongwriter', 'Singer-Songwriter'), B('jazz', 'Jazz'), B('blues', 'Blues'),
+  B('funk', 'Funk / Disco'), B('reggae', 'Reggae'), B('reggaeton', 'Reggaeton'), B('latin', 'Latin'), B('schlager', 'Schlager'),
+  B('ambient', 'Chill / Ambient'), B('cinematic', 'Epic / Cinematic'), B('classical', 'Classical'),
+  B('kids', "Children's Song"), B('christmas', 'Christmas'),
+]
+const BASIC_MOODS: Option[] = [
+  B('joyful', 'Happy'), B('energetic', 'Energetic'), B('chill', 'Relaxed'), B('romantic', 'Romantic'), B('dreamy', 'Dreamy'),
+  B('nostalgic', 'Nostalgic'), B('sad', 'Sad'), B('dark', 'Dark'), B('aggressive', 'Angry'), B('epic', 'Epic'),
+  B('mysterious', 'Mysterious'), B('playful', 'Playful'), B('sexy', 'Sexy'), B('groovy', 'Groovy'),
+]
+const BASIC_VOCALS: Option[] = [
+  B('none', 'No singing'), B('female', 'Female voice'), B('male', 'Male voice'), B('duet', 'Duet'),
+  B('choir', 'Choir'), B('rap', 'Rap'), B('femalerap', 'Female rap'),
+]
+const CURVE_CARDS: [Settings['energyCurve'], string, string][] = [
+  ['rise', 'Builds up', 'starts small, grows to a big finish'],
+  ['peak-mid', 'Peaks in the middle', 'biggest moment mid-track, calmer ending'],
+  ['waves', 'Ups and downs', 'energy comes and goes in waves'],
+  ['flat', 'Steady', 'keeps one level the whole way through'],
+  ['fall', 'Starts big', 'opens at full power, then winds down'],
+  ['layers', 'Layer by layer', 'instruments join in one at a time'],
+]
+
+const basicBlock = (title: string, small: string, body: string) => `
+  <div class="module bmod"><div class="module-body">
+    <h2><span>${title}</span>${small ? `<small>${small}</small>` : ''}</h2>${body}
+  </div></div>`
+
+const basicBuilder = () => {
+  const otherGenres = settings.genres.filter((id) => !BASIC_STYLES.some((b) => b.id === id))
+  const otherMoods = settings.moods.filter((id) => !BASIC_MOODS.some((b) => b.id === id))
+  const allG = GENRE_GROUPS.flatMap((g) => g.genres)
+  const allM = MOOD_GROUPS.flatMap((g) => g.options)
+  return `
+  <section class="builder basic">
+    ${basicBlock('1 · Style', 'what should it sound like? pick one or two', `
+      ${chips('genres', BASIC_STYLES, true)}
+      ${otherGenres.length ? `<div class="selected-genres">${otherGenres.map((id) => {
+        const g = allG.find((x) => x.id === id)
+        return g ? `<button type="button" class="tag" data-remove-genre="${id}">${esc(g.label)} <i>×</i></button>` : ''
+      }).join('')}</div>` : ''}`)}
+    ${basicBlock('2 · Feeling', 'how should it feel?', `
+      ${chips('moods', BASIC_MOODS, true)}
+      ${otherMoods.length ? `<div class="selected-genres">${otherMoods.map((id) => {
+        const x = allM.find((y) => y.id === id)
+        return x ? `<button type="button" class="tag" data-remove="moods:${id}">${esc(x.label)} <i>×</i></button>` : ''
+      }).join('')}</div>` : ''}`)}
+    ${basicBlock('3 · Singing', '', chips('vocals', BASIC_VOCALS, false))}
+    ${basicBlock('4 · The journey', 'how the energy moves, and how long the track is', `
+      <div class="curve-cards">${CURVE_CARDS.map(([id, label, sub]) =>
+        `<button type="button" class="ccard${settings.energyCurve === id ? ' on' : ''}" data-curve="${id}"><b>${label}</b><span>${sub}</span></button>`).join('')}</div>
+      <label class="blen">Length ${range('lengthSec', 30, MAX_LENGTH, 5, 's')}</label>`)}
+    ${basicBlock('5 · Anything else?', 'optional — your own words go straight into the prompt', `
+      <textarea data-key="custom" rows="2" placeholder="e.g. a summer road trip song about my dog">${esc(settings.custom)}</textarea>`)}
+    <button type="button" class="btn surprise" id="surpriseBtn">Surprise me — pick something for me</button>
+    <p class="muted small">Want full control over instruments, arrangement, tempo and every section? Switch to <b>Pro</b> at the top.</p>
+  </section>`
+}
+
 const groupedRack = (key: keyof Settings, groups: OptionGroup[], multi = true) => {
   const selected = multi ? (settings[key] as string[]) : [settings[key] as string]
   const all = groups.flatMap((g) => g.options)
@@ -172,6 +299,10 @@ function render() {
     <div class="brand"><span class="mark"></span><h1>Suno Prompt Desk</h1></div>
     <div class="top-right">
       <p>Pick a sound, shape the arrangement, copy the prompt.</p>
+      <div class="mode-switch" role="group" aria-label="Editor mode">
+        <button type="button" class="${settings.mode === 'basic' ? 'on' : ''}" data-mode="basic" title="Simple editor — no music knowledge needed">Basic</button>
+        <button type="button" class="${settings.mode === 'pro' ? 'on' : ''}" data-mode="pro" title="Full control over every detail">Pro</button>
+      </div>
       <button type="button" class="btn reset-all" id="resetAllBtn" title="Reset every section to its defaults"><span class="reset-icon" aria-hidden="true">↺</span> Reset all</button>
     </div>
   </header>
@@ -180,7 +311,7 @@ function render() {
   </section>
 
   <main class="layout">
-    <section class="builder">
+    ${settings.mode === 'basic' ? basicBuilder() : `<section class="builder">
       ${module('genres', 'Genres', settings.genres.length ? `${settings.genres.length} combined` : 'combine any number', genreRack())}
       ${module('moods', 'Mood', settings.moods.length ? `${settings.moods.length} selected` : '', groupedRack('moods', MOOD_GROUPS))}
       ${module('instruments', 'Instruments', settings.instruments.length ? `${settings.instruments.length} selected` : '', groupedRack('instruments', INSTRUMENT_GROUPS))}
@@ -201,7 +332,7 @@ function render() {
         </div>`)}
       ${module('custom', 'Extra details', settings.custom.trim() ? `${settings.custom.trim().length} chars` : '', `
         <textarea data-key="custom" rows="2" placeholder="e.g. sunset drive, lyrics about letting go, whistle hook…">${esc(settings.custom)}</textarea>`)}
-      ${module('track', 'Track progression', `${Math.floor(settings.lengthSec / 60)}:${String(settings.lengthSec % 60).padStart(2, '0')} · ${settings.sectionCount} sections · ${settings.energyCurve}`, `
+      ${module('track', 'Track progression', `${Math.floor(settings.lengthSec / 60)}:${String(settings.lengthSec % 60).padStart(2, '0')} · ${settings.sectionCount} sections · ${settings.energyCurve} · ${labelOf(PROGRESSION_GROUPS, settings.progression).toLowerCase()}`, `
         <div class="grid3">
           <label>Length ${range('lengthSec', 30, MAX_LENGTH, 5, 's')}</label>
           <label>Sections ${range('sectionCount', 3, 16, 1)}</label>
@@ -210,9 +341,11 @@ function render() {
           <label><span class="toggle"><input type="checkbox" data-key="hasIntro" ${settings.hasIntro ? 'checked' : ''} /> Intro</span>${settings.hasIntro ? range('introSeconds', 0, 60, 1, 's') : '<span class="off">off</span>'}</label>
           <label><span class="toggle"><input type="checkbox" data-key="hasOutro" ${settings.hasOutro ? 'checked' : ''} /> Outro</span>${settings.hasOutro ? range('outroSeconds', 0, 60, 1, 's') : '<span class="off">off</span>'}</label>
         </div>
+        <p class="muted small">The section layout follows your progression style — <b>${labelOf(PROGRESSION_GROUPS, settings.progression)}</b>. Change it in the “Progression style” section above.</p>
         <div class="curve">${curveSvg(settings)}</div>
-        ${settings.energyCurve === 'layers' ? layerEditor() : ''}`)}
-    </section>
+        ${settings.energyCurve === 'layers' ? layerEditor() : ''}
+        ${sectionMix()}`)}
+    </section>`}
 
     <aside class="sheet ${sheetOpen ? 'open' : ''}" id="sheetPanel">
       <div class="sticky ${loading ? 'is-loading' : ''}" aria-busy="${loading}">
@@ -332,6 +465,46 @@ function bind() {
     d.addEventListener('toggle', () => { d.open ? openSections.add(d.dataset.sec!) : openSections.delete(d.dataset.sec!) }))
   app.querySelectorAll<HTMLButtonElement>('.reset-sec').forEach((b) => b.addEventListener('click', (e) => e.stopPropagation()))
   app.querySelectorAll<HTMLButtonElement>('[data-shuffle]').forEach((b) => b.addEventListener('click', () => update(SHUFFLERS[b.dataset.shuffle!]())))
+  // mode switch (UI preference — no regeneration needed)
+  app.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+    if (settings.mode === b.dataset.mode) return
+    settings = { ...settings, mode: b.dataset.mode as Settings['mode'] }
+    saveDraft(settings)
+    render()
+    trackEvent('Mode', { mode: settings.mode })
+  }))
+  // basic mode: energy-journey cards and the surprise button
+  app.querySelectorAll<HTMLButtonElement>('.ccard').forEach((b) =>
+    b.addEventListener('click', () => update({ energyCurve: b.dataset.curve as Settings['energyCurve'] })))
+  document.getElementById('surpriseBtn')?.addEventListener('click', () => update({
+    genres: sample(BASIC_STYLES.map((x) => x.id), 1 + rnd(2)),
+    moods: sample(BASIC_MOODS.map((x) => x.id), 1 + rnd(2)),
+    vocals: one(BASIC_VOCALS.map((x) => x.id)),
+    energyCurve: one(['rise', 'peak-mid', 'waves', 'flat', 'fall', 'layers'] as const),
+    seed: newSeed(), progSeed: newSeed(),
+  }))
+  // section mix
+  app.querySelector<HTMLDetailsElement>('details.secmix')?.addEventListener('toggle', function (this: HTMLDetailsElement) {
+    this.open ? openGroups.add('secmix') : openGroups.delete('secmix')
+  })
+  app.querySelectorAll<HTMLButtonElement>('[data-sm]').forEach((b) => b.addEventListener('click', () => {
+    const [kind, idx, id] = b.dataset.sm!.split(':')
+    const i = Number(idx)
+    const o = settings.sectionOverrides[i] ?? EMPTY_OV
+    const key = kind === 'g' ? 'genres' : 'moods'
+    const cur = o[key]
+    setOverride(i, { [key]: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id] })
+  }))
+  app.querySelectorAll<HTMLButtonElement>('[data-sm-reset]').forEach((b) =>
+    b.addEventListener('click', () => setOverride(Number(b.dataset.smReset), { genres: [], moods: [], energy: -1 })))
+  app.querySelectorAll<HTMLInputElement>('.sm-energy').forEach((inp) => {
+    inp.addEventListener('input', () => {
+      const out = inp.nextElementSibling as HTMLOutputElement
+      out.textContent = `${inp.value}%`
+      out.classList.add('set')
+    })
+    inp.addEventListener('change', () => setOverride(Number(inp.dataset.i), { energy: Number(inp.value) }))
+  })
   // layer editor
   app.querySelector('#layersAuto')?.addEventListener('click', () => update({ layers: [] }))
   app.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((b) => b.addEventListener('click', () => {
@@ -407,7 +580,7 @@ function bind() {
       } else update({ [key]: id } as Partial<Settings>)
     })
   })
-  app.querySelectorAll<HTMLInputElement>('input[type=range]').forEach((inp) => {
+  app.querySelectorAll<HTMLInputElement>('input[type=range][data-key]').forEach((inp) => {
     inp.addEventListener('input', () => {
       const out = inp.nextElementSibling as HTMLOutputElement
       out.textContent = inp.value + (out.textContent?.replace(/[\d.-]+/, '') ?? '')
@@ -422,10 +595,10 @@ function bind() {
   })
   app.querySelectorAll<HTMLInputElement>('input[type=checkbox][data-key]').forEach((cb) =>
     cb.addEventListener('change', () => update({ [cb.dataset.key!]: cb.checked } as Partial<Settings>)))
-  app.querySelectorAll<HTMLSelectElement>('select').forEach((sel) =>
+  app.querySelectorAll<HTMLSelectElement>('select[data-key]').forEach((sel) =>
     sel.addEventListener('change', () => update({ [sel.dataset.key!]: sel.value } as Partial<Settings>)))
-  const ta = app.querySelector<HTMLTextAreaElement>('textarea')!
-  ta.addEventListener('change', () => update({ custom: ta.value }))
+  const ta = app.querySelector<HTMLTextAreaElement>('textarea[data-key=custom]')
+  ta?.addEventListener('change', () => update({ custom: ta.value }))
 
   app.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach((b) =>
     b.addEventListener('click', async () => {
@@ -439,7 +612,7 @@ function bind() {
 
   document.getElementById('shuffleBtn')!.addEventListener('click', () => update({ seed: newSeed() }))
   document.getElementById('shuffleSheetBtn')!.addEventListener('click', () => update({ progSeed: newSeed() }))
-  const resetAll = () => { update({ ...DEFAULT_SETTINGS, seed: newSeed(), progSeed: newSeed() }); setStatus('Everything reset') }
+  const resetAll = () => { update({ ...DEFAULT_SETTINGS, mode: settings.mode, seed: newSeed(), progSeed: newSeed() }); setStatus('Everything reset') }
   document.getElementById('resetBtn')!.addEventListener('click', resetAll)
   document.getElementById('resetAllBtn')!.addEventListener('click', resetAll)
   app.querySelectorAll<HTMLButtonElement>('[data-reset]').forEach((b) => b.addEventListener('click', () => {
@@ -466,7 +639,7 @@ function bind() {
   app.querySelectorAll<HTMLButtonElement>('[data-load]').forEach((b) =>
     b.addEventListener('click', () => {
       const h = history.find((x) => x.id === b.dataset.load)
-      if (h) { update({ ...DEFAULT_SETTINGS, ...migrate(h.settings) }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+      if (h) { update({ ...DEFAULT_SETTINGS, ...migrate(h.settings), mode: settings.mode }); window.scrollTo({ top: 0, behavior: 'smooth' }) }
     }))
   app.querySelectorAll<HTMLButtonElement>('[data-hcopy]').forEach((b) =>
     b.addEventListener('click', async () => {

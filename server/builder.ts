@@ -1,7 +1,7 @@
 import {
   ARRANGEMENTS, ERAS, GENRES, INSTRUMENTS, genreGroupOf, MOODS, PRODUCTION, PROGRESSION_STYLES, SECTION_TYPES, VOCALS, type Option,
 } from '../shared/data.ts'
-import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, type Layer, type Settings } from '../shared/settings.ts'
+import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, type Layer, type SectionOverride, type Settings } from '../shared/settings.ts'
 
 
 
@@ -410,6 +410,86 @@ const ARRANGEMENT_TEMPLATES: Record<string, string[][]> = {
   ],
 }
 
+// ---- progression style → section layout ----
+// The "Progression style" choice reshapes the middle of the track (intro/outro untouched).
+const cyc = (pattern: string[]) => (mid: string[]) => mid.map((_, i) => pattern[i % pattern.length])
+const distinctSections = (mid: string[], r: () => number) => {
+  const a = ['Verse', 'Build', 'Chorus', 'Breakdown', 'Bridge', 'Solo', 'Drop', 'Pre-Chorus']
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]] }
+  return mid.map((_, i) => a[i % a.length])
+}
+const endOn = (mid: string[], pre: string, last: string) => {
+  if (mid.length >= 2) { mid[mid.length - 2] = pre; mid[mid.length - 1] = last } else if (mid.length) mid[0] = last
+  return mid
+}
+const STYLE_MIDDLE: Record<string, (mid: string[], r: () => number) => string[]> = {
+  'verse-chorus': cyc(['Verse', 'Chorus', 'Verse', 'Chorus', 'Bridge', 'Chorus']),
+  aaba: cyc(['Verse', 'Verse', 'Bridge', 'Verse']),
+  strophic: cyc(['Verse']),
+  bluesform: cyc(['Verse', 'Verse', 'Solo', 'Verse']),
+  ballad: (m) => m.map((_, i) => (i >= m.length - 2 ? 'Chorus' : ['Verse', 'Verse', 'Chorus'][i % 3])),
+  hookfirst: (m) => m.map((x, i) => (i === 0 ? (m.includes('Drop') ? 'Drop' : 'Chorus') : x)),
+  doublechorus: (m) => endOn([...m], m.includes('Drop') ? 'Drop' : 'Chorus', m.includes('Drop') ? 'Drop' : 'Chorus'),
+  drops: cyc(['Verse', 'Build', 'Drop', 'Breakdown', 'Build', 'Drop']),
+  breakdownheavy: cyc(['Verse', 'Breakdown', 'Build', 'Drop', 'Breakdown']),
+  doubledrop: (m) => endOn(cyc(['Verse', 'Build', 'Drop', 'Breakdown'])(m), 'Build', 'Drop'),
+  falsedrop: (m) => endOn(cyc(['Verse', 'Build', 'Drop', 'Breakdown'])(m), 'Build', 'Drop'),
+  peakearly: (m) => m.map((x, i) => (i === 0 ? (m.includes('Drop') ? 'Drop' : 'Chorus') : x)),
+  linear: distinctSections,
+  throughcomposed: distinctSections,
+  medley: distinctSections,
+  loop: cyc(['Verse', 'Verse', 'Verse', 'Breakdown']),
+  dynamic: cyc(['Build', 'Drop', 'Breakdown']),
+  tidal: cyc(['Build', 'Chorus', 'Breakdown']),
+  cinematicarc: (m) => m.map((_, i) => {
+    const t = (i + 1) / (m.length + 1)
+    return t < 0.3 ? 'Verse' : t < 0.5 ? 'Build' : t < 0.65 ? 'Chorus' : t < 0.8 ? 'Breakdown' : 'Chorus'
+  }),
+  jam: cyc(['Verse', 'Solo', 'Verse', 'Solo', 'Bridge']),
+  falling: (m) => m.map((_, i) => {
+    const t = i / m.length
+    return t < 0.25 ? 'Chorus' : t < 0.5 ? 'Verse' : t < 0.75 ? 'Bridge' : 'Breakdown'
+  }),
+  quietloud: cyc(['Verse', 'Chorus']),
+  twopart: (m) => m.map((x, i) => (i >= m.length / 2 ? ['Bridge', 'Breakdown', 'Chorus'][(i - Math.ceil(m.length / 2)) % 3] : x)),
+  threeact: (m) => m.map((_, i) => {
+    const t = i / m.length
+    return t < 1 / 3 ? ['Verse', 'Build'][i % 2] : t < 2 / 3 ? ['Breakdown', 'Bridge'][i % 2] : ['Build', 'Chorus'][i % 2]
+  }),
+}
+
+// style-specific colour for individual sheet lines (mi = index among middle sections, mn = middle count)
+function styleNote(s: Settings, id: string, mi: number, mn: number, dropNo: number, r: () => number): string {
+  const first = mi === 0, last = mi === mn - 1, midpt = mi === Math.floor(mn / 2)
+  switch (s.progression) {
+    case 'build': return first ? 'starting from almost nothing' : last ? 'the fullest the track gets' : ''
+    case 'minimal': return first ? 'just a couple of elements to begin with' : ''
+    case 'crescendo': return last ? 'the single climax the whole track has been building toward' : ''
+    case 'plateau': return mi === 1 ? 'full energy reached already and held from here on' : ''
+    case 'terraced': return mi > 0 && mi % 2 === 0 ? 'a clear step up in energy from the last section' : ''
+    case 'latebloom': return last ? 'the track finally opens up to full size' : mi === mn - 2 ? 'still holding back, hinting at what is coming' : ''
+    case 'falsedrop': return id === 'Drop' ? (dropNo === 0 ? 'a teased false drop that cuts away just before it lands' : dropNo === 1 ? 'the real drop this time, at full weight' : '') : ''
+    case 'doubledrop': return id === 'Drop' && dropNo === 1 ? 'the second drop, bigger than the first' : ''
+    case 'peakearly': return first ? 'the peak lands right away' : mi === 1 ? 'settling into the groove after the early peak' : ''
+    case 'loop': return midpt ? 'the loop keeps running, mutating in small details' : ''
+    case 'sudden': return mi > 0 && r() < 0.4 ? 'entered by an abrupt cut, no transition' : ''
+    case 'callresponse': return r() < 0.35 ? 'built on call-and-response phrases' : ''
+    case 'tempochange': return midpt ? 'the tempo changes deliberately here' : ''
+    case 'halftimeswitch': return last ? 'switched to half-time, twice as heavy' : ''
+    case 'genreswitch': {
+      if (!midpt) return ''
+      const g2 = s.genres[1] ? GENRES.find((x) => x.id === s.genres[1])?.tag : ''
+      return g2 ? `switches into ${g2} for this section before returning` : 'switches genre for this section before returning'
+    }
+    case 'quietloud': return ['Chorus', 'Drop'].includes(id) ? 'suddenly loud' : id === 'Verse' ? 'kept deliberately quiet' : ''
+    case 'twopart': return mi === Math.ceil(mn / 2) ? 'the second movement begins, a deliberate contrast to the first half' : ''
+    case 'threeact': return mi === Math.ceil(mn / 3) ? 'act two: the mood shifts' : mi === Math.ceil((2 * mn) / 3) ? 'act three: heading for resolution' : ''
+    case 'medley': case 'throughcomposed': return r() < 0.4 ? 'a new theme, distinct from what came before' : ''
+    case 'linear': return r() < 0.35 ? 'still evolving, nothing repeated' : ''
+    default: return ''
+  }
+}
+
 function pickSections(s: Settings, r: () => number): string[] {
   const n = Math.max(3, Math.min(16, s.sectionCount))
   let base: string[]
@@ -424,10 +504,11 @@ function pickSections(s: Settings, r: () => number): string[] {
   }
   const middle = base.slice(1, -1)
   const edges = (s.hasIntro ? 1 : 0) + (s.hasOutro ? 1 : 0)
-  const result: string[] = s.hasIntro ? ['Intro'] : []
-  for (let i = 0; i < n - edges; i++) result.push(middle[i % middle.length])
-  if (s.hasOutro) result.push('Outro')
-  return result
+  let mid: string[] = []
+  for (let i = 0; i < n - edges; i++) mid.push(middle[i % middle.length])
+  const styled = STYLE_MIDDLE[s.progression]
+  if (styled) mid = styled(mid, r)
+  return [...(s.hasIntro ? ['Intro'] : []), ...mid, ...(s.hasOutro ? ['Outro'] : [])]
 }
 
 function energyAt(t: number, curve: Settings['energyCurve']): number {
@@ -740,12 +821,15 @@ export function buildProgression(s: Settings): string[] {
   const entryOf = (name: string) => s.layers.find((l) => l.name === name)?.entry ?? ''
   let t = 0
   const leadInst = s.instruments[0] ? INSTRUMENTS.find((x) => x.id === s.instruments[0])?.tag : undefined
+  const middleCount = sections.length - (s.hasIntro ? 1 : 0) - (s.hasOutro ? 1 : 0)
+  let dropNo = 0
 
   sections.forEach((id, i) => {
     const w = SECTION_TYPES.find((x) => x.id === id)?.weight ?? 1
     const dur = id === 'Intro' ? intro : id === 'Outro' ? outro : (middleLen * w) / weightSum
     const start = t, end = Math.min(total, t + dur)
-    const e = energyAt((start + dur / 2) / total, s.energyCurve)
+    const o = s.sectionOverrides[i]
+    const e = o && o.energy >= 0 ? Math.max(0, Math.min(1, o.energy / 100)) : energyAt((start + dur / 2) / total, s.energyCurve)
     const hints = arrHints[id] ?? SECTION_HINTS[id]
     const fresh = hints.filter((h) => !used.has(h))
     let hint = pick(r, fresh.length ? fresh : hints)
@@ -757,8 +841,25 @@ export function buildProgression(s: Settings): string[] {
     const ctx: string[] = []
     if (leadInst && ['Intro', 'Verse', 'Chorus', 'Bridge'].includes(id) && r() < 0.5) ctx.push(pick(r, [`${leadInst} prominent`, `${leadInst} carries the melody`, `${leadInst} answering the lead`]))
     if (vocalTag && ['Verse', 'Pre-Chorus', 'Chorus', 'Bridge'].includes(id) && r() < 0.5) ctx.push(pick(r, [`${vocalTag} upfront`, `${vocalTag} with harmonies`, `${vocalTag} restrained`]))
-    if (moodWord && r() < 0.4) ctx.push(pick(r, [`${moodWord} feel`, `keeps the ${moodWord} tone`, `${moodWord} and focused`]))
+    if (moodWord && !o?.moods.length && r() < 0.4) ctx.push(pick(r, [`${moodWord} feel`, `keeps the ${moodWord} tone`, `${moodWord} and focused`]))
     if (ctx.length) hint += `, ${ctx.join(', ')}`
+    // explicit per-section direction from the section mix editor
+    if (o?.genres.length) {
+      const g = tags(GENRES, o.genres.filter((id) => s.genres.includes(id)))
+      if (g.length) hint += `, ${pick(r, [`${listOf(g)} take the lead here`, `leaning fully into ${listOf(g)}`, `this section lives in ${listOf(g)} territory`])}`
+    }
+    if (o?.moods.length) {
+      const mm = tags(MOODS, o.moods.filter((id) => s.moods.includes(id)))
+      if (mm.length) hint += `, ${pick(r, [`${listOf(mm)} mood front and centre`, `the feel here is ${listOf(mm)}`, `${listOf(mm)} in tone`])}`
+    }
+    // reflect the chosen progression style in the sheet lines
+    if (id === 'Intro' && s.progression === 'dj') hint += ', kept beat-only and DJ-friendly for mixing'
+    else if (id === 'Outro' && s.progression === 'dj') hint += ', beat-only outro, easy to mix out of'
+    else if (id === 'Outro' && s.progression === 'circular') hint += ', the intro motif returns and the track ends where it began'
+    else if (id !== 'Intro' && id !== 'Outro') {
+      const note = styleNote(s, id, i - (s.hasIntro ? 1 : 0), middleCount, id === 'Drop' ? dropNo++ : dropNo, r)
+      if (note) hint += `, ${note}`
+    }
     const vocalLed = ['acapella', 'beatbox'].includes(s.arrangement)
     if (id === 'Solo' && leadInst && !vocalLed && s.arrangement !== 'orchestralArr') hint = `${leadInst} solo`
     if (vocalLed && leadInst && ['Breakdown', 'Bridge', 'Intro'].includes(id) && r() < 0.6) hint += `, faint ${leadInst} underneath`
@@ -799,6 +900,15 @@ export function sanitize(input: unknown): Settings {
     introSeconds: num('introSeconds', d.introSeconds, 0, 60), outroSeconds: num('outroSeconds', d.outroSeconds, 0, 60),
     layers: Array.isArray(i.layers) ? (i.layers as unknown[]).filter((l): l is Layer => !!l && typeof (l as Layer).name === 'string').slice(0, 16)
       .map((l) => ({ name: l.name.slice(0, 60), entry: LAYER_ENTRIES.includes(l.entry) ? l.entry : '' })) : [],
+    sectionOverrides: Array.isArray(i.sectionOverrides) ? (i.sectionOverrides as unknown[]).slice(0, 18).map((x): SectionOverride => {
+      const o = (x ?? {}) as Record<string, unknown>
+      const sarr = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).filter((y) => typeof y === 'string').slice(0, 12) as string[] : [])
+      return {
+        genres: sarr(o.genres), moods: sarr(o.moods),
+        energy: typeof o.energy === 'number' && Number.isFinite(o.energy) ? Math.min(100, Math.max(-1, o.energy)) : -1,
+      }
+    }) : [],
+    mode: i.mode === 'basic' ? 'basic' : 'pro',
   }
 }
 
