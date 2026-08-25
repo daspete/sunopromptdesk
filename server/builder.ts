@@ -21,13 +21,15 @@ const pick = <T,>(r: () => number, arr: T[]): T => arr[Math.floor(r() * arr.leng
 const tags = (list: Option[], ids: string[]) =>
   ids.map((id) => list.find((x) => x.id === id)?.tag).filter(Boolean) as string[]
 
-type Tiered = { s: string; m: string; l: string; x?: string }
+type Tiered = { s: string; m: string; l: string; x?: string; pri?: boolean }
 
 const listOf = (arr: string[]) => (arr.length > 1 ? `${arr.slice(0, -1).join(', ')} and ${arr[arr.length - 1]}` : arr[0] ?? '')
 
 function promptParts(s: Settings, r: () => number): Tiered[] {
   const parts: Tiered[] = []
   const P = (short: string, medium: string, long: string, xl?: string) => parts.push({ s: short, m: medium, l: long, x: xl })
+  // priority parts (genres, mood, instruments): claim the character budget for their long wording first
+  const PRI = (short: string, medium: string, long: string, xl?: string) => parts.push({ s: short, m: medium, l: long, x: xl, pri: true })
   // optional descriptive add-ons: empty at short/medium, only appear when there is room
   const X = (long: string, xl: string) => parts.push({ s: '', m: '', l: long, x: xl })
 
@@ -35,13 +37,13 @@ function promptParts(s: Settings, r: () => number): Tiered[] {
   if (s.genres.length) {
     const g = tags(GENRES, s.genres)
     if (g.length === 1) {
-      P(g[0],
+      PRI(g[0],
         pick(r, [`${g[0]} track`, `pure ${g[0]}`, `${g[0]} production`]),
         pick(r, [`an authentic ${g[0]} track that stays true to the genre's signature sound`, `${g[0]}, true to the style with its classic rhythmic and harmonic language`, `a ${g[0]} production that captures everything the genre is known for`]),
         pick(r, [`an authentic ${g[0]} track that stays true to the genre's signature sound: the typical rhythm patterns, the characteristic instrument tones and the kind of arrangement a seasoned ${g[0]} producer would write`, `a ${g[0]} production that captures everything the genre is known for, from its trademark groove and chord voicings to the sonic details that make it instantly recognisable to fans of the style`]))
     } else {
       const joiner = pick(r, [' fused with ', ' blended with ', ' meets ', ' crossed with ', ' infused with '])
-      P(g.join(' + '),
+      PRI(g.join(' + '),
         pick(r, [g.join(joiner), `a blend of ${listOf(g)}`, `${g[0]} with ${listOf(g.slice(1))} influences`]),
         pick(r, [`a hybrid of ${listOf(g)}, where ${g[0]} sets the foundation and ${listOf(g.slice(1))} colour the arrangement`, `${g[0]} at its core, ${joiner.trim()} ${listOf(g.slice(1))} so both worlds stay recognisable throughout`, `${listOf(g)} woven together, shifting emphasis between the styles from section to section`]),
         pick(r, [`a genuine hybrid of ${listOf(g)}: ${g[0]} provides the rhythmic foundation and overall structure, while ${listOf(g.slice(1))} shape the melodic content, the textures and the sound palette, so that both worlds stay clearly recognisable and neither one feels like a gimmick`, `${listOf(g)} woven together into one coherent sound, shifting emphasis between the styles from section to section, borrowing the groove from one and the harmonic and timbral identity from the other`]))
@@ -51,7 +53,7 @@ function promptParts(s: Settings, r: () => number): Tiered[] {
   // mood
   if (s.moods.length) {
     const m = tags(MOODS, s.moods)
-    P(m.join(', '),
+    PRI(m.join(', '),
       pick(r, [`${m.join(', ')} mood`, `${m.join(', ')} atmosphere`, `${listOf(m)} feel`, `${m.join(', ')} vibe`]),
       pick(r, [`an overall ${listOf(m)} mood that carries through every section`, `the atmosphere is ${listOf(m)}, felt in the melodies, the chord choices and the sound design`, `emotionally ${listOf(m)}, with the energy of the arrangement serving that feeling first`]),
       pick(r, [`an overall ${listOf(m)} mood that carries through every section, expressed in the melodic phrasing, the chord choices, the sound design and the way the dynamics rise and fall, so the emotional tone is unmistakable from the first seconds`, `the atmosphere is ${listOf(m)}, felt in the melodies, the harmony and the textures, and the arrangement is paced so that this feeling deepens as the track develops rather than staying static`]))
@@ -62,11 +64,11 @@ function promptParts(s: Settings, r: () => number): Tiered[] {
     const i = tags(INSTRUMENTS, s.instruments)
     const vocalLed = ['acapella', 'beatbox'].includes(s.arrangement)
     if (vocalLed) {
-      P(`subtle ${i.join(', ')}`,
+      PRI(`subtle ${i.join(', ')}`,
         pick(r, [`subtle touches of ${i.join(', ')} far in the background`, `with only faint, sparse ${listOf(i)} accents`, `minimal ${i.join(', ')} textures under the voices`]),
         pick(r, [`${listOf(i)} used very sparingly and mixed far behind the voices, adding colour without ever competing with the vocal arrangement`, `only the faintest hints of ${listOf(i)}, tucked under the vocal layers so the voices stay the whole focus`]))
     } else {
-      P(i.join(', '),
+      PRI(i.join(', '),
         pick(r, [`featuring ${i.join(', ')}`, `with ${i.join(', ')}`, `built around ${listOf(i)}`, `${listOf(i)} lead the arrangement`]),
         pick(r, [`built around ${listOf(i)}, each given its own space in the mix and its own moment to lead`, `featuring ${listOf(i)}, with ${i[0]} carrying the main hook while the rest support and answer it`, `instrumentation centred on ${listOf(i)}, arranged so they interlock rather than crowd each other`]),
         pick(r, [`built around ${listOf(i)}, each given its own register and its own space in the stereo field, with ${i[0]} carrying the main hook and the other elements answering, doubling or supporting it depending on the section`, `featuring ${listOf(i)}, arranged so they interlock rather than crowd each other: ${i[0]} leads the melodic content while the rest provide rhythm, harmony and texture, and each instrument gets at least one moment where it steps into the foreground`]))
@@ -203,16 +205,26 @@ export function buildPrompt(s: Settings): string {
   if (!parts.length) return ''
   const join = (tiers: (keyof Tiered)[]) => parts.map((p, i) => p[tiers[i]] ?? p.l).filter(Boolean).join(', ')
 
-  // start short, upgrade part by part (round-robin: everything to medium, then to long) while it still fits
+  // start short, then upgrade while it still fits: everything to medium first, then the
+  // priority parts (genres, mood, instruments) take their long and extra-long wording
+  // before the remaining parts and add-ons compete for whatever budget is left
+  const pri = parts.map((p, i) => (p.pri ? i : -1)).filter((i) => i >= 0)
+  const rest = parts.map((p, i) => (p.pri ? -1 : i)).filter((i) => i >= 0)
+  const steps: [number, keyof Tiered][] = [
+    ...pri.map((i): [number, keyof Tiered] => [i, 'm']),
+    ...rest.map((i): [number, keyof Tiered] => [i, 'm']),
+    ...pri.map((i): [number, keyof Tiered] => [i, 'l']),
+    ...pri.map((i): [number, keyof Tiered] => [i, 'x']),
+    ...rest.map((i): [number, keyof Tiered] => [i, 'l']),
+    ...rest.map((i): [number, keyof Tiered] => [i, 'x']),
+  ]
   const tiers: (keyof Tiered)[] = parts.map(() => 's')
   let out = join(tiers)
-  for (const next of ['m', 'l', 'x'] as const) {
-    for (let i = 0; i < parts.length; i++) {
-      if (next === 'x' && !parts[i].x) continue
-      const trial = [...tiers]; trial[i] = next
-      const t = join(trial)
-      if (t.length <= MAX_PROMPT) { tiers[i] = next; out = t }
-    }
+  for (const [i, next] of steps) {
+    if (next === 'x' && !parts[i].x) continue
+    const trial = [...tiers]; trial[i] = next
+    const t = join(trial)
+    if (t.length <= MAX_PROMPT) { tiers[i] = next; out = t }
   }
 
   // still too long even at all-short (e.g. huge custom text): trim the custom text to the room that is left

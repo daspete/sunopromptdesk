@@ -294,6 +294,11 @@ function render() {
   const prog = gen.progression
   const pct = Math.min(100, (prompt.length / MAX_PROMPT) * 100)
 
+  // full innerHTML swaps drop the browser's scroll anchor (the tapped button is
+  // destroyed), which makes mobile browsers jump the page — save and restore
+  const scrollY = window.scrollY
+  const sheetScroll = app.querySelector('.sheet .sticky')?.scrollTop ?? 0
+
   app.innerHTML = `
   <header class="top">
     <div class="brand"><span class="mark"></span><h1>Suno Prompt Desk</h1></div>
@@ -413,6 +418,10 @@ function render() {
   </footer>`
 
   bind()
+
+  const sticky = app.querySelector('.sheet .sticky')
+  if (sticky && sticky.scrollTop !== sheetScroll) sticky.scrollTop = sheetScroll
+  if (window.scrollY !== scrollY) window.scrollTo(0, scrollY)
 }
 
 function curveSvg(s: Settings) {
