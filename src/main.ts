@@ -1,6 +1,6 @@
 import './style.css'
 import {
-  ARRANGEMENT_GROUPS, ERAS, GENRE_GROUPS, INSTRUMENT_GROUPS, KEYS, MOOD_GROUPS, PRODUCTION_GROUPS, PROGRESSION_GROUPS, SCALES, VOCAL_GROUPS, type Option, type OptionGroup,
+  ARRANGEMENT_GROUPS, ERAS, GENRE_GROUPS, INSTRUMENT_GROUPS, KEYS, MOOD_GROUPS, PRODUCTION_GROUPS, PROGRESSION_GROUPS, SCALES, VOCAL_GROUPS, suggestedBpm, type Option, type OptionGroup,
 } from '../shared/data'
 import { DEFAULT_SETTINGS, LAYER_ENTRIES, MAX_LENGTH, MAX_PROMPT, newSeed, type Generated, type SectionOverride, type Settings } from '../shared/settings'
 import { requestGeneration } from './api'
@@ -69,9 +69,10 @@ const SHUFFLERS: Record<string, () => Partial<Settings>> = {
 }
 
 const openSections = new Set<string>()
-const module = (section: string, title: string, small: string, body: string) => `
+const module = (section: string, title: string, small: string, body: string, bar = '') => `
   <details class="module" data-sec="${section}" ${openSections.has(section) ? 'open' : ''}>
     <summary><h2><span class="caret"></span><span>${title}</span>${small ? `<small>${small}</small>` : ''}
+      ${bar}
       ${SHUFFLERS[section] ? `<button type="button" class="reset-sec" data-shuffle="${section}" title="Randomise ${title.toLowerCase()}">shuffle</button>` : ''}
       <button type="button" class="reset-sec" data-reset="${section}" title="Reset ${title.toLowerCase()}" ${isDefault(section) ? 'disabled' : ''}>reset</button></h2></summary>
     <div class="module-body">${body}</div>
@@ -94,6 +95,31 @@ const genreRack = () => `
     const g = GENRE_GROUPS.flatMap((x) => x.genres).find((x) => x.id === id)
     return g ? `<button type="button" class="tag" data-remove-genre="${id}">${esc(g.label)} <i>×</i></button>` : ''
   }).join('')}</div>` : ''}`
+
+const PRIO_LEVELS = [
+  { w: 2, label: 'high', hint: 'Gets the detailed wording first' },
+  { w: 1, label: 'normal', hint: 'Detailed wording when space allows' },
+  { w: 0, label: 'brief', hint: 'Always stays brief' },
+]
+// per-section "Prompt detail" control: expansion priority while filling the prompt,
+// direct template length when the fill toggle is off
+const prioSeg = (id: string, cls = '') => {
+  const cur = settings.promptWeights[id] ?? 1
+  return `<div class="seg3${cls ? ` ${cls}` : ''}" title="Prompt detail">${PRIO_LEVELS.map(({ w, label: l, hint }) =>
+    `<button type="button" class="${cur === w ? 'on' : ''}" data-prio="${id}:${w}" title="${hint}">${l}</button>`).join('')}</div>`
+}
+const prioBar = (id: string) => prioSeg(id, 'prio-seg')
+const prioCtl = (id: string, label = 'Prompt detail') =>
+  `<div class="prio-ctl"><span class="prio-label">${esc(label)}</span>${prioSeg(id)}</div>`
+
+const promptOptions = () => `
+  <div class="prompt-opts">
+    <label><span class="toggle"><input type="checkbox" data-key="fillPrompt" ${settings.fillPrompt ? 'checked' : ''} /> Fill the prompt up to ${MAX_PROMPT} characters</span></label>
+    <p class="muted small">${settings.fillPrompt
+      ? 'Each section’s “Prompt detail” sets who gets the detailed wording first — differences only show once the 1000 characters run short; brief sections never expand.'
+      : 'Each section’s “Prompt detail” picks the wording directly: high = long, normal = medium, brief = shortest.'}</p>
+    ${prioCtl('extras', 'Polish details (hooks, transitions, ending…)')}
+  </div>`
 
 const layerEditor = () => {
   const custom = settings.layers.length > 0
@@ -317,17 +343,17 @@ function render() {
 
   <main class="layout">
     ${settings.mode === 'basic' ? basicBuilder() : `<section class="builder">
-      ${module('genres', 'Genres', settings.genres.length ? `${settings.genres.length} combined` : 'combine any number', genreRack())}
-      ${module('moods', 'Mood', settings.moods.length ? `${settings.moods.length} selected` : '', groupedRack('moods', MOOD_GROUPS))}
-      ${module('instruments', 'Instruments', settings.instruments.length ? `${settings.instruments.length} selected` : '', groupedRack('instruments', INSTRUMENT_GROUPS))}
+      ${module('genres', 'Genres', settings.genres.length ? `${settings.genres.length} combined` : 'combine any number', genreRack(), prioBar('genres'))}
+      ${module('moods', 'Mood', settings.moods.length ? `${settings.moods.length} selected` : '', groupedRack('moods', MOOD_GROUPS), prioBar('moods'))}
+      ${module('instruments', 'Instruments', settings.instruments.length ? `${settings.instruments.length} selected` : '', groupedRack('instruments', INSTRUMENT_GROUPS), prioBar('instruments'))}
       ${module('arrangement', 'Arrangement', labelOf(ARRANGEMENT_GROUPS, settings.arrangement), `
         ${groupedRack('arrangement', ARRANGEMENT_GROUPS, false)}
         ${['acapella', 'beatbox'].includes(settings.arrangement) && settings.vocals === 'none' ? '<p class="hint">Acapella and beatbox need a vocal style.</p>' : ''}
-        ${['acapella', 'beatbox'].includes(settings.arrangement) && settings.instruments.length ? '<p class="hint">Instruments stay subtle, under the vocals.</p>' : ''}`)}
-      ${module('vocals', 'Vocals', labelOf(VOCAL_GROUPS, settings.vocals), groupedRack('vocals', VOCAL_GROUPS, false))}
-      ${module('progression', 'Progression style', labelOf(PROGRESSION_GROUPS, settings.progression), groupedRack('progression', PROGRESSION_GROUPS, false))}
-      ${module('era', 'Era', esc(ERAS.find((e) => e.id === settings.era)?.label ?? ''), chips('era', ERAS, false))}
-      ${module('production', 'Production', settings.production.length ? `${settings.production.length} selected` : '', groupedRack('production', PRODUCTION_GROUPS))}
+        ${['acapella', 'beatbox'].includes(settings.arrangement) && settings.instruments.length ? '<p class="hint">Instruments stay subtle, under the vocals.</p>' : ''}`, prioBar('arrangement'))}
+      ${module('vocals', 'Vocals', labelOf(VOCAL_GROUPS, settings.vocals), groupedRack('vocals', VOCAL_GROUPS, false), prioBar('vocals'))}
+      ${module('progression', 'Progression style', labelOf(PROGRESSION_GROUPS, settings.progression), groupedRack('progression', PROGRESSION_GROUPS, false), prioBar('progression'))}
+      ${module('era', 'Era', esc(ERAS.find((e) => e.id === settings.era)?.label ?? ''), chips('era', ERAS, false), prioBar('era'))}
+      ${module('production', 'Production', settings.production.length ? `${settings.production.length} selected` : '', groupedRack('production', PRODUCTION_GROUPS), prioBar('production'))}
       ${module('tempo', 'Tempo &amp; key', `${Math.min(settings.bpmMin, settings.bpmMax)}–${Math.max(settings.bpmMin, settings.bpmMax)} bpm${settings.key !== 'Any' ? ` · ${settings.key} ${settings.scale}` : ''}`, `
         <div class="grid4">
           <label>BPM from ${range('bpmMin', 40, 220, 1)}</label>
@@ -366,6 +392,7 @@ function render() {
           <button class="btn" data-copy="prompt">Copy prompt</button>
           <button class="btn" id="shuffleBtn" title="Re-roll the prompt wording">Shuffle prompt</button>
         </div>
+        ${settings.mode === 'pro' ? promptOptions() : ''}
 
         <div class="sheet-head"><h2>Progression sheet</h2><span class="count">${prog.length}<i> sections</i></span></div>
         ${timeline(prog, Math.max(30, settings.lengthSec))}
@@ -447,6 +474,12 @@ function setStatus(msg: string, ok = true) {
 }
 
 function update(patch: Partial<Settings>) {
+  // changing the genre selection adapts the tempo to the combination's typical range
+  // (unless the patch sets the tempo itself, e.g. loading a saved prompt or a reset)
+  if (patch.genres && patch.bpmMin == null && patch.bpmMax == null) {
+    const r = suggestedBpm(patch.genres)
+    if (r) patch = { ...patch, bpmMin: r[0], bpmMax: r[1] }
+  }
   settings = { ...settings, ...patch }
   saveDraft(settings)
   regenerate()
@@ -514,6 +547,12 @@ function bind() {
     })
     inp.addEventListener('change', () => setOverride(Number(inp.dataset.i), { energy: Number(inp.value) }))
   })
+  // per-section prompt detail weight (lives in the accordion bar: don't toggle the section)
+  app.querySelectorAll<HTMLButtonElement>('[data-prio]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation()
+    const [id, w] = b.dataset.prio!.split(':')
+    update({ promptWeights: { ...settings.promptWeights, [id]: Number(w) } })
+  }))
   // layer editor
   app.querySelector('#layersAuto')?.addEventListener('click', () => update({ layers: [] }))
   app.querySelectorAll<HTMLButtonElement>('[data-move]').forEach((b) => b.addEventListener('click', () => {

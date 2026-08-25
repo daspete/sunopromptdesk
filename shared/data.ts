@@ -102,6 +102,53 @@ export const GENRE_GROUPS: GenreGroup[] = [
 export const GENRES: Option[] = GENRE_GROUPS.flatMap((g) => g.genres)
 export const genreGroupOf = (id: string) => GENRE_GROUPS.find((g) => g.genres.some((x) => x.id === id))?.id
 
+/** Typical tempo range per genre group; genres that clearly deviate are listed in GENRE_BPM. */
+const GROUP_BPM: Record<string, [number, number]> = {
+  house: [118, 128], techno: [125, 140], trance: [132, 142], bass: [130, 175], hard: [145, 180],
+  electronic: [95, 125], hiphop: [80, 105], pop: [95, 125], rock: [100, 140], metal: [100, 160],
+  jazz: [70, 130], folk: [80, 120], world: [90, 130], ambient: [60, 90], experimental: [80, 140],
+}
+const GENRE_BPM: Record<string, [number, number]> = {
+  // house
+  deephouse: [118, 124], tropical: [100, 115], frenchhouse: [115, 125], lofihouse: [110, 122],
+  // techno
+  minimal: [125, 132], detroit: [125, 135], dubtechno: [115, 125], industrialtechno: [135, 150],
+  hardtechno: [145, 160], schranz: [150, 170], peaktime: [132, 140],
+  // trance
+  goa: [135, 145], psytrance: [138, 145], fullon: [140, 148], darkpsy: [148, 160], forest: [148, 155],
+  hitech: [160, 180], hardtrance: [140, 150], psychill: [90, 110], classictrance: [130, 140],
+  // bass & breaks
+  dnb: [170, 178], liquid: [170, 176], neurofunk: [170, 178], jungle: [160, 175], jumpup: [172, 178],
+  drumstep: [160, 175], dubstep: [138, 145], riddim: [140, 150], melodicdubstep: [140, 150], brostep: [140, 150],
+  garage: [128, 135], '2step': [130, 138], speedgarage: [130, 138], grime: [138, 142], breakbeat: [125, 138],
+  bigbeat: [120, 135], halftime: [85, 90], trapedm: [140, 150], footwork: [155, 165], ukbass: [128, 140],
+  breakcore: [180, 220], dub: [70, 90],
+  // hard dance
+  hardstyle: [145, 155], rawstyle: [148, 158], hardcore: [170, 190], gabber: [170, 190], happyhardcore: [165, 180],
+  uptempo: [190, 220], frenchcore: [190, 210], jumpstyle: [140, 150], hands: [140, 150], bigroom: [126, 132],
+  eurodance: [130, 145], donk: [140, 150],
+  // electronic & synth
+  synthwave: [100, 118], retrowave: [100, 118], darksynth: [110, 128], outrun: [105, 120], vaporwave: [60, 90],
+  chillwave: [90, 110], futurebass: [140, 160], idm: [90, 140], glitchhop: [95, 110], downtempo: [70, 100],
+  triphop: [70, 95], chiptune: [120, 160], hyperpop: [140, 170], phonk: [130, 150], driftphonk: [135, 155],
+  jerseyclub: [130, 140], moombahton: [100, 115], complextro: [126, 132], edm: [124, 130],
+  // hip hop & r&b
+  trap: [130, 150], drill: [138, 145], ukdrill: [138, 145], lofi: [70, 90], boombap: [85, 95],
+  gfunk: [88, 100], crunk: [70, 85], memphis: [130, 145], rage: [140, 160], plugg: [130, 150],
+  rnb: [65, 95], altrnb: [65, 100], neosoul: [65, 95], newjack: [100, 115],
+}
+export const bpmRangeOf = (id: string): [number, number] =>
+  GENRE_BPM[id] ?? GROUP_BPM[genreGroupOf(id) ?? ''] ?? [90, 140]
+
+/** Suggested tempo for a genre combination: the overlap of all typical ranges, or the full envelope when they don't overlap. */
+export function suggestedBpm(genres: string[]): [number, number] | null {
+  if (!genres.length) return null
+  const rs = genres.map(bpmRangeOf)
+  const lo = Math.max(...rs.map((r) => r[0])), hi = Math.min(...rs.map((r) => r[1]))
+  if (lo <= hi) return [lo, hi]
+  return [Math.min(...rs.map((r) => r[0])), Math.max(...rs.map((r) => r[1]))]
+}
+
 export const INSTRUMENT_GROUPS: OptionGroup[] = [
   { id: 'keys', label: 'Keys', options: [
     o('piano', 'Piano'), o('grandpiano', 'Grand Piano'), o('uprightpiano', 'Upright Piano'), o('rhodes', 'Rhodes'), o('wurlitzer', 'Wurlitzer'),

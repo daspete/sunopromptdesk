@@ -157,6 +157,20 @@ pre.prog { color: var(--scope); }
 .layer-list li.dragging .grip { cursor: grabbing; }
 .layer-list .n { font-family: var(--mono); font-size: .75rem; color: var(--muted); text-align: right; }
 .layer-list input, .layer-list select { padding: 6px 9px; font-size: .85rem; }
+.prio-ctl { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.prio-ctl .prio-label { font-size: .78rem; color: var(--muted); }
+.seg3 { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; }
+.seg3 button { border: 0; background: transparent; color: var(--muted); font: inherit; font-size: .75rem; padding: 5px 12px; cursor: pointer; transition: background .12s, color .12s; }
+.seg3 button:hover { color: var(--ink); }
+.seg3 button.on { background: var(--accent); color: var(--accent-ink); }
+/* compact variant sitting in the accordion bar, right-aligned so bars line up */
+.module h2 .prio-seg { margin-left: auto; align-self: center; flex: 0 0 auto; }
+.prio-seg button { font-family: var(--mono); font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; }
+.prio-seg + .reset-sec { margin-left: 10px; }
+/* prompt options block in the sheet panel */
+.prompt-opts { margin: 16px 0 4px; padding-top: 14px; border-top: 1px solid var(--line); }
+.prompt-opts .prio-ctl { margin-top: 10px; padding-top: 0; border-top: 0; }
+.prompt-opts .muted.small { margin: 8px 0 0; }
 .ib { width: 30px; height: 30px; border: 1px solid var(--line-strong); background: transparent; color: var(--ink); border-radius: 4px; cursor: pointer; font: inherit; }
 .ib:hover { border-color: var(--accent); } .ib:disabled { opacity: .3; cursor: default; }
 .layer-add { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
@@ -288,6 +302,9 @@ pre.prompt:empty::before { content: ''; display: block; height: 3.2em; }
   .module summary h2 small { flex-basis: 100%; order: 5; padding-left: 17px; white-space: normal; }
   .reset-sec { padding: 6px 8px; margin-left: 0; }
   .reset-sec:first-of-type { margin-left: auto; }
+  /* when the prompt-detail control is in the bar, it takes the right edge instead */
+  .prio-seg ~ .reset-sec:first-of-type { margin-left: 8px; }
+  .prio-seg button { padding: 6px 9px; }
   .module-body { padding: 14px 14px 16px; }
   .group summary { padding: 12px 4px; }
   .group .chips { padding-left: 8px; }

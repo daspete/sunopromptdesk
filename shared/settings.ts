@@ -30,7 +30,24 @@ export interface Settings {
   layers: Layer[]
   sectionOverrides: SectionOverride[]
   mode: 'basic' | 'pro'
+  /** Per-section prompt detail weight: 2 = detailed wording first, 1 = normal, 0 = always stays short. */
+  promptWeights: Record<string, number>
+  /** Fill the prompt with detailed wording up to MAX_PROMPT; off keeps every section short. */
+  fillPrompt: boolean
 }
+
+/** Prompt sections whose wording can be prioritised when filling the character budget. */
+export const PROMPT_SECTIONS: { id: string; label: string }[] = [
+  { id: 'genres', label: 'Genres' },
+  { id: 'moods', label: 'Mood' },
+  { id: 'instruments', label: 'Instruments' },
+  { id: 'arrangement', label: 'Arrangement' },
+  { id: 'vocals', label: 'Vocals' },
+  { id: 'progression', label: 'Progression style' },
+  { id: 'era', label: 'Era' },
+  { id: 'production', label: 'Production' },
+  { id: 'extras', label: 'Polish details (hooks, transitions, ending…)' },
+]
 
 export const DEFAULT_SETTINGS: Settings = {
   genres: [], instruments: [], moods: [], progression: 'build', vocals: 'none', arrangement: 'full', era: 'none',
@@ -38,6 +55,8 @@ export const DEFAULT_SETTINGS: Settings = {
   lengthSec: 180, sectionCount: 6, energyCurve: 'rise', structure: 'auto',
   hasIntro: true, hasOutro: true, introSeconds: 15, outroSeconds: 15, layers: [],
   sectionOverrides: [], mode: 'basic',
+  promptWeights: { genres: 2, moods: 2, instruments: 2 },
+  fillPrompt: false,
 }
 
 export const MAX_PROMPT = 1000
