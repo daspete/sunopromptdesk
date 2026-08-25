@@ -108,7 +108,8 @@ const prioSeg = (id: string, cls = '') => {
   return `<div class="seg3${cls ? ` ${cls}` : ''}" title="Prompt detail">${PRIO_LEVELS.map(({ w, label: l, hint }) =>
     `<button type="button" class="${cur === w ? 'on' : ''}" data-prio="${id}:${w}" title="${hint}">${l}</button>`).join('')}</div>`
 }
-const prioBar = (id: string) => prioSeg(id, 'prio-seg')
+// wrapped so mobile can move the control onto its own row (desktop: display: contents)
+const prioBar = (id: string) => `<div class="prio-row">${prioSeg(id, 'prio-seg')}</div>`
 const prioCtl = (id: string, label = 'Prompt detail') =>
   `<div class="prio-ctl"><span class="prio-label">${esc(label)}</span>${prioSeg(id)}</div>`
 

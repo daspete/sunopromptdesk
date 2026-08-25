@@ -164,9 +164,10 @@ pre.prog { color: var(--scope); }
 .seg3 button:hover { color: var(--ink); }
 .seg3 button.on { background: var(--accent); color: var(--accent-ink); }
 /* compact variant sitting in the accordion bar, right-aligned so bars line up */
+.prio-row { display: contents; }
 .module h2 .prio-seg { margin-left: auto; align-self: center; flex: 0 0 auto; }
 .prio-seg button { font-family: var(--mono); font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; padding: 3px 8px; }
-.prio-seg + .reset-sec { margin-left: 10px; }
+.prio-row + .reset-sec { margin-left: 10px; }
 /* prompt options block in the sheet panel */
 .prompt-opts { margin: 16px 0 4px; padding-top: 14px; border-top: 1px solid var(--line); }
 .prompt-opts .prio-ctl { margin-top: 10px; padding-top: 0; border-top: 0; }
@@ -302,9 +303,14 @@ pre.prompt:empty::before { content: ''; display: block; height: 3.2em; }
   .module summary h2 small { flex-basis: 100%; order: 5; padding-left: 17px; white-space: normal; }
   .reset-sec { padding: 6px 8px; margin-left: 0; }
   .reset-sec:first-of-type { margin-left: auto; }
-  /* when the prompt-detail control is in the bar, it takes the right edge instead */
-  .prio-seg ~ .reset-sec:first-of-type { margin-left: 8px; }
-  .prio-seg button { padding: 6px 9px; }
+  /* prompt-detail control moves onto its own full-width row under the header,
+     right-aligned with a small label so the three levels have context */
+  .module summary h2 .prio-row { display: flex; flex-basis: 100%; order: 6; justify-content: flex-end; align-items: center; gap: 10px; padding-left: 17px; }
+  .module summary h2 .prio-row::before { content: 'prompt detail'; font-family: var(--mono); font-weight: 400; font-size: .62rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  .module h2 .prio-seg { margin-left: 0; }
+  .prio-seg button { padding: 8px 12px; min-height: 34px; }
+  .prio-row + .reset-sec { margin-left: auto; }
+  .prompt-opts .seg3 button { padding: 8px 14px; min-height: 34px; }
   .module-body { padding: 14px 14px 16px; }
   .group summary { padding: 12px 4px; }
   .group .chips { padding-left: 8px; }
@@ -358,4 +364,7 @@ pre.prompt:empty::before { content: ''; display: block; height: 3.2em; }
   .layer-list li { grid-template-columns: 16px 20px 1fr 36px 36px 36px; }
   .layer-list .layer-name { grid-column: 3 / -1; }
   .layer-list .layer-entry { grid-column: 1 / 4; }
+  /* very narrow: keep the prompt-detail row on one line */
+  .module summary h2 .prio-row { gap: 8px; padding-left: 0; }
+  .prio-seg button { padding: 8px 10px; }
 }
